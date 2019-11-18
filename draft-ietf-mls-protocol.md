@@ -603,6 +603,7 @@ Each node in a ratchet tree contains up to three values:
 * An ordered list of leaf indices for "unmerged" leaves (see
   {{views}})
 * A credential (only for leaf nodes)
+* A signature over the content of the node
 
 The conditions under which each of these values must or must not be
 present are laid out in {{views}}.
@@ -752,6 +753,7 @@ leaf, as well as the root:
 * The public key for the node
 * Zero or more encrypted copies of the path secret corresponding to
   the node
+* A signature over the node content
 
 The path secret value for a given node is encrypted for the subtree
 corresponding to the parent's non-updated child, i.e., the child
@@ -988,18 +990,21 @@ struct {
 struct {
     HPKEPublicKey public_key;
     Credential credential;
+    opaque signature<0..2^16-1>;
 } LeafNodeInfo;
 
 struct {
-    uint8 hash_type = 0;
+    uint32 leaf_index;
     optional<LeafNodeInfo> info;
 } LeafNodeHashInput;
 ~~~~~
 
 The `public_key` and `credential` fields represent the leaf public
 key and the credential for the member holding that leaf,
-respectively.  The `info` field is equal to the null optional value
-when the leaf is blank (i.e., no member occupies that leaf).
+respectively.  The signature is computed over its serialized prefix
+within the `LeafNodeInfo`. The `info` field is equal to the null
+optional value when the leaf is blank (i.e., no member occupies that
+leaf).
 
 Likewise, the hash of a parent node (including the root) is the hash
 of a `ParentNodeHashInput` struct:
@@ -1008,10 +1013,11 @@ of a `ParentNodeHashInput` struct:
 struct {
     HPKEPublicKey public_key;
     uint32_t unmerged_leaves<0..2^32-1>;
+    opaque signature<0..2^16-1>;
 } ParentNodeInfo;
 
 struct {
-    uint8 hash_type = 1;
+    uint32 node_index;
     optional<ParentNodeInfo> info;
     opaque left_hash<0..255>;
     opaque right_hash<0..255>;
@@ -1019,10 +1025,19 @@ struct {
 ~~~~~
 
 The `left_hash` and `right_hash` fields hold the hashes of the
-node's left and right children, respectively.  The `public_key`
+node's left and right children, respectively.  The signature within
+the `ParentNodeInfo` is computed over the its serialized prefix which
+contains both the `public_key` and the list of unmerged leaves. The `public_key`
 field holds the hash of the public key stored at this node,
 represented as an `optional<HPKEPublicKey>` object, which is null if
 and only if the node is blank.
+
+While hashes at the nodes are used to check the integrity of the
+subtrees, the signatures are required to provide information to
+members regarding who has last updated a node. This information
+is especially important in the case of newcomers and the signatures
+in the nodes SHOULD be verified punctually, and especially by
+the newcomer to join the group.
 
 ## Group State
 
@@ -1892,8 +1907,7 @@ Commit.
 
 ~~~~~
 struct {
-    HPKEPublicKey public_key;
-    uint32_t unmerged_leaves<0..2^32-1>;
+    ParentNodeInfo info;
     optional<Credential> credential;
 } RatchetNode;
 
@@ -1909,7 +1923,7 @@ struct {
   opaque epoch_secret<0..255>;
 
   uint32 signer_index;
-  opaque signature<0..255>;
+  opaque signature<0..2^16-1>;
 } GroupInfo;
 
 struct {
